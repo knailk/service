@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import com.audit.converter.QuestionConverter;
 import com.audit.dto.ModuleDTO;
 import com.audit.dto.QuestionDTO;
 import com.audit.dto.SkillDTO;
@@ -27,51 +28,52 @@ public class QuestionService {
     @Autowired
     private CommonService commonService;
 
-    private final Logger logger = LoggerFactory.getLogger(QuestionService.class);
+    @Autowired
+    private QuestionConverter questionConverter;
 
-    public List<Question> getAllQuestion() {
-        List<Question> allQuestion = questionRepository.findAll();
-        if (allQuestion.isEmpty()) throw new NotFoundException("Not found any question");
-        else return allQuestion;
-    }
+    private final Logger logger = LoggerFactory.getLogger(QuestionService.class);
 
     public int countQuestion() {
         return questionRepository.countQuestion();
     }
 
-    public List<Question> getAllQuestion(Pageable pageable) {
+    public List<?> getQuestions(Pageable pageable) {
         if (countQuestion() == 0) {
             throw new NotFoundException("Not found any question");
         }
         try {
-            return questionRepository.findAll(pageable).getContent();
+            return questionConverter.toDto( questionRepository.findAll(pageable).getContent() );
         }
         catch (Exception e) {
             throw new InternalServerException("Error in finding question");
         }
     }
 
-    public Question getQuestionById(Integer id) {
+    public QuestionDTO getQuestionById(Integer id) {
         if (id == null) throw new BadRequestException("The question id is null");
         Optional<Question> foundQuestion = questionRepository.findById(id);
         if (!foundQuestion.isPresent()) throw new NotFoundException("The question with id = "+ id +" doesn't exists");
-        return foundQuestion.get();
+        return questionConverter.toDto( foundQuestion.get() );
     }
 
-    public Question createQuestion(Question question) {
-        if (question == null) throw new BadRequestException("The question is null");
+    public QuestionDTO createQuestion(QuestionCreateRequest newQuestion) {
+        if (newQuestion == null) throw new BadRequestException("The question is null");
+        Question question = questionConverter.toEnity(newQuestion); 
         if (question.getSkillId() < 0) throw new BadRequestException("The skill id is unvalid");
         if (question.getModuleId() < 0) throw new BadRequestException("The module id is unvalid");
         Optional<Question> foundQuestion = questionRepository.findById(question.getId());
         if (foundQuestion.isPresent()) throw new NotFoundException("The question with id = "+ question.getId() +" has already existed.");
-        else return questionRepository.save(question);
+        else return questionConverter.toDto( questionRepository.save(question) );
     }
 
-    public Question updateQuestion(Question question) {
-        if (question == null) throw new BadRequestException("The question is null");
+    public QuestionDTO updateQuestion(QuestionDTO questionDto) {
+        if (questionDto == null) throw new BadRequestException("The question is null");
+        Question question = questionConverter.toEnity(questionDto);
         Optional<Question> foundQuestion = questionRepository.findById(question.getId());
         if (foundQuestion.isPresent()) {
             Question question2 = foundQuestion.get();
+            if (question2.getSkillId() < 0) throw new BadRequestException("The skill id is unvalid");
+            if (question2.getModuleId() < 0) throw new BadRequestException("The module id is unvalid");
             question2.setContent(question.getContent());
             question2.setSolution(question.getSolution());
             question2.setLevel(question.getLevel());
@@ -82,7 +84,7 @@ public class QuestionService {
         else {
             throw new NotFoundException("The question with id = "+ question.getId() +" doesn't exist.");
         }
-        return foundQuestion.get();
+        return questionConverter.toDto( questionRepository.save( foundQuestion.get() ) );
     }
 
     public void deleteQuestion(Integer id) {
@@ -94,7 +96,7 @@ public class QuestionService {
         }
         else throw new NotFoundException("This question id = "+ id +" doesn't exists");
     }
-    public List<Boolean> deleteQuestionList(List<Integer> list) {
+    public List<Boolean> deleteQuestions(List<Integer> list) {
         if (list == null) throw new BadRequestException("The question list is null");
         if (list.isEmpty()) throw new BadRequestException("The question list is empty");
         List<Boolean> res = new ArrayList<>();
@@ -108,52 +110,6 @@ public class QuestionService {
             else res.add(false);
         }
         return res;
-    }
-
-    public QuestionDTO toDto(Question question) {
-        return new QuestionDTO(
-            question.getId(), 
-            question.getContent(), 
-            question.getSolution(), 
-            question.getLevel(), 
-            getSkill(question.getSkillId()),
-            getModule(question.getModuleId()), 
-            question.getStatus()
-        );
-    }
-
-    public Question toEnity(QuestionDTO questionDTO) {
-        return new Question(
-            questionDTO.getId(),
-            questionDTO.getQuestion(),
-            questionDTO.getAnswer(),
-            questionDTO.getLevel(),
-            getSkillId(questionDTO.getSkill()),
-            getModuleId(questionDTO.getModule()),
-            questionDTO.getStatus(),
-            false
-        );
-    }
-
-    public Question toEnity(QuestionCreateRequest question) {
-        return new Question(
-            question.getQuestion(),
-            question.getAnswer(),
-            question.getLevel(),
-            getSkillId(question.getSkill()),
-            getModuleId(question.getModule()),
-            question.getStatus(),
-            false
-        );
-    }
-
-
-    public List<QuestionDTO> toDto(List<Question> questions) {
-        List<QuestionDTO> list = new ArrayList<>();
-        for (Question i : questions) {
-            list.add(toDto(i));
-        }
-        return list;
     }
 
     //Class Service
@@ -180,7 +136,7 @@ public class QuestionService {
 
     }
 
-    public List<String> getListModule() {
+    public List<String> getModules() {
         List<ModuleDTO> modules = commonService.getModuleList();
         List<String> res = new ArrayList<>();
         for (ModuleDTO module : modules) {
@@ -211,7 +167,7 @@ public class QuestionService {
         throw new com.audit.exception.NotFoundException("The skill with name = "+name+" doesn't exist");
     }
 
-    public List<String> getListSkill() {
+    public List<String> getSkills() {
         List<SkillDTO> skills = commonService.getSkillList();
         List<String> res = new ArrayList<>();
         for (SkillDTO skill : skills) {
@@ -220,21 +176,4 @@ public class QuestionService {
         return res;
     }
 
-    // public List<QuestionDTO> findQuestionByModule(String name) {
-    //     List<QuestionDTO> list = toDto( questionRepository.findByModuleId(getModuleId(name)) );
-    //     if (list.isEmpty()) throw new NotFoundException("The found question list is empty");
-    //     return list;
-    // }
-    // public List<QuestionDTO> findQuestionBySkill(String name) {
-    //     List<QuestionDTO> list = toDto( questionRepository.findBySkillId(getSkillId(name)) );
-    //     if (list.isEmpty()) throw new NotFoundException("The found question list is empty");
-    //     return list;
-    // }
-    // public List<QuestionDTO> findQuestionByModuleSkill(String module, String skill) {
-    //     List<QuestionDTO> list = toDto( 
-    //         questionRepository.findByModuleSkillId(getModuleId(module) , getSkillId(skill)) 
-    //     );
-    //     if (list.isEmpty()) throw new NotFoundException("The found question list is empty");
-    //     return list;
-    // }
 }

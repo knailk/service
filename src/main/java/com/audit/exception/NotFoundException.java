@@ -8,7 +8,6 @@ public class NotFoundException extends RuntimeException {
     private final String message;
 
     public NotFoundException(String message) {
-        // super("Resource Not Found");
         this.message = message;
     }
 

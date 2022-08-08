@@ -30,4 +30,7 @@ public interface QuestionRepository extends JpaRepository<Question, Integer> {
     Page<Question> getListQuestionByScheduleModule(Integer module_id,Pageable pageable);
     @Query(value = "select * from question_bank where content = ?1 and is_deleted = false",nativeQuery = true)
     Question findByContent(String content);
+
+    @Query(value = "SELECT * FROM question_bank WHERE id = ?1 AND is_deleted = false", nativeQuery = true)
+    Question findOneById(Integer id);
 }

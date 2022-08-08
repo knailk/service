@@ -5,6 +5,7 @@ import com.audit.exception.NotFoundException;
 import com.audit.feignclients.ClassFeignClient;
 import com.audit.feignclients.UserFeignClient;
 import com.audit.request.AuditScheduleRequest;
+import com.audit.request.MailRequest;
 import com.audit.entity.AuditReport;
 import com.audit.entity.AuditSchedule;
 import com.audit.entity.AuditTrainee;
@@ -14,13 +15,19 @@ import com.audit.repository.AuditScheduleRepository;
 import com.audit.repository.AuditTraineeRepository;
 import com.audit.request.UpdateScheduleRequest;
 import com.audit.request.UserNameEmailRequest;
-import com.audit.request.UserNameRequest;
 import com.audit.response.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import javassist.expr.NewArray;
+
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 @Service
@@ -41,47 +48,46 @@ public class AuditScheduleService {
     @Autowired
     ClassFeignClient classFeignClient;
 
-    public int totalItem() {
-        return (int) auditScheduleRepository.count();
-    }
-
-    public int totalItem(int id) {
-        return auditTraineeRepository.countByScheduleId(id);
-    }
-
-    public int totalPage(int page, int size){
-        int totalPage = (int) Math.ceil((double) ((int) auditScheduleRepository.count()) / size);
-        checkPage(page, size, totalPage);
-        return totalPage;
-    }
-
-    public int totalPage(int page, int size, int auditScheduleId){
-        int totalPage = (int) Math.ceil((double) auditTraineeRepository.countByScheduleId(auditScheduleId) / size);
-        checkPage(page, size, totalPage);
-        return totalPage;
-    }
-
-    public void checkPage(int page, int size, int totalPage){
-        if (page > totalPage) {
-            throw new NotFoundException("Resource not found!");
-        } else if (page < 0 || size < 0) {
-            throw new BadRequestException("page or size invalid!");
+    public long countAll(int id, int role) {
+        if(role!=4)
+            return auditScheduleRepository.countByIsDeleted();
+        else{
+            return auditScheduleRepository.countByIsDeletedAU(id);
         }
+    }
+
+    public int totalPage(int page, int size, int auditScheduleId) {
+        int totalPage = (int) Math.ceil((double) auditTraineeRepository.countByScheduleId(auditScheduleId) / size);
+        commonService.checkPage(page, size, totalPage);
+        return totalPage;
     }
 
     ////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////// GET ALL AUDIT SCHEDULE///////////////////////////
-    public List<AuditScheduleResponse> getAllAuditSchedule(Pageable pageable) {
+    public List<AuditScheduleResponse> getAllAuditSchedule(int id, int role, Pageable pageable) {
+        List<AuditScheduleResult> auditSchedules;
         // Find all auditSchedule in database
-        List<AuditScheduleResult> auditSchedules = auditScheduleRepository.findAllAD(pageable).getContent();
+        if(role != 4) {
+            auditSchedules  = auditScheduleRepository.findAllAD(pageable).getContent();
+        }
+        else{
+            auditSchedules = auditScheduleRepository.findAllAU(id, pageable).getContent();
+        }
+        List<Integer> auditorResults = new ArrayList<>();
+        for(AuditScheduleResult auditScheduleItem : auditSchedules){
+            auditorResults.add(auditScheduleItem.getAuditor_id());
+        }
+        Map<Integer,String> auditors = commonService.getUserNameById(auditorResults);
         List<AuditScheduleResponse> auditScheduleResponses = new ArrayList<>();
         for (AuditScheduleResult auditScheduleItem : auditSchedules) {
-            // Name auditor
-            UserNameRequest nameAuditor = commonService.getUserNameById(auditScheduleItem.getAuditor_id());
             // Date and time
             List<String> dateTime = subDateTime(auditScheduleItem.getTime().toString());
             // Response
-            auditScheduleResponses.add(new AuditScheduleResponse(auditScheduleItem.getId(), nameAuditor.getName(),
+            String nameAuditor = auditors.get(auditScheduleItem.getAuditor_id());
+            if(null == nameAuditor) {
+                nameAuditor = "Not Found!";
+            }
+            auditScheduleResponses.add(new AuditScheduleResponse(auditScheduleItem.getId(), nameAuditor,
                     dateTime.get(0), dateTime.get(1), auditScheduleItem.getRoom()));
         }
         return auditScheduleResponses;
@@ -97,41 +103,43 @@ public class AuditScheduleService {
     }
 
     //////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////// GET DETAIL OF AUDIT
-    ////////////////////////////////////////////////////////////////////////////////////// SCHEDULE//////////////////////////
+    /////////////////////////////// GET DETAIL OF AUDIT SCHEDULE//////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////
 
-    public DetailAuditScheduleResponse getDetailAuditSchedule(int id, Pageable pageable) {
+    public DetailAuditScheduleResponse getDetailAuditSchedule(int id, int userId, int role, Pageable pageable) {
         // Find AuditSchedule
+        if(role !=4){
+            throw new BadRequestException("You can not access this data");
+        }
         Optional<AuditSchedule> auditScheduleOptional = auditScheduleRepository.findById(id);
         if (auditScheduleOptional.isPresent()) {
             AuditSchedule auditSchedule = auditScheduleOptional.get();
+            if(auditSchedule.getAuditorId() != userId){
+                throw new BadRequestException("You cannot access this data");
+            }
             // Get auditor's name
-            UserNameRequest auditorName = commonService.getUserNameById(auditSchedule.getAuditorId());
+            Map<Integer, String> auditorName = commonService.getUserNameById(List.of(auditSchedule.getAuditorId()));
             // Get date time
             List<String> dateTime = subDateTime(auditSchedule.getTime().toString());
             AuditReport auditReport;
             // if auditReport not exists, create auditReport
             if (auditSchedule.getAuditReport() == null) {
-
                 auditReport = new AuditReport(-1, auditSchedule, null);
                 auditSchedule.setAuditReport(auditReport);
                 auditReportRepository.save(auditReport);
-
             } else {
                 auditReport = auditSchedule.getAuditReport();
             }
             List<AuditItemResponse> auditItemResponse = new ArrayList<>();
             List<Integer> traineeIdList = auditTraineeRepository.getAllByIdAudit(id, pageable).getContent();
 
+            Map<Integer,UserNameEmailRequest> trainees = commonService.getUserNameEmailById(traineeIdList);
             Set<IndividualAuditReport> individualAuditReportSet = null;
             if (auditReport.getIndividualAuditReports() != null) {
                 individualAuditReportSet = auditReport.getIndividualAuditReports();
-
             }
             // For list auditTrainee to find auditItemResponse
             for (int traineeId : traineeIdList) {
-                // String[] nameEmail = {"haha","haha"};
-                UserNameEmailRequest nameEmail = commonService.getUserNameEmailById(traineeId);
                 // Check if the Individual Audit Report already exists
                 List<String> idGrade = new ArrayList<>();
                 idGrade.add("-1");
@@ -146,15 +154,25 @@ public class AuditScheduleService {
                 // If the id is found and the score has not been filled in, an auditing case
                 // occurs
                 if (!idGrade.get(0).equals("-1")) {
-                    if(idGrade.get(1).equals("-1")) evaluate = "Auditing";
-                    else evaluate = "Audited";
+                    if (idGrade.get(1).equals("-1"))
+                        evaluate = "Auditing";
+                    else
+                        evaluate = "Audited";
+                }
+                UserNameEmailRequest trainee = trainees.get(traineeId);
+                if(trainee == null){
+                    trainee = new UserNameEmailRequest("Not Found!", "Not Found!");
                 }
                 // Add detailAuditScheduleResponse to list
-                auditItemResponse.add(new AuditItemResponse(Integer.parseInt(idGrade.get(0)), nameEmail.getName(),
-                        traineeId, nameEmail.getEmail(), Double.parseDouble(idGrade.get(1)),
+                auditItemResponse.add(new AuditItemResponse(Integer.parseInt(idGrade.get(0)), trainee.getName(),
+                        traineeId, trainee.getMail(), Double.parseDouble(idGrade.get(1)),
                         evaluate));
             }
-            return new DetailAuditScheduleResponse(auditReport.getId(), auditorName.getName(),
+            String nameAuditor = auditorName.get(auditSchedule.getAuditorId());
+            if(nameAuditor == null){
+                nameAuditor = "Not Found!";
+            }
+            return new DetailAuditScheduleResponse(auditReport.getId(), nameAuditor,
                     dateTime.get(0) + " " + dateTime.get(1), auditSchedule.getRoom(), auditItemResponse);
 
         } else {
@@ -177,10 +195,10 @@ public class AuditScheduleService {
     }
 
     /////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////// DELETE AUDIT
-    ///////////////////////////////////////////////////////////////////////////////////// SCHEDULE//////////////////////////////
+    ///////////////////////////////// DELETE AUDIT SCHEDULE//////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////
 
-    public List<StatusDeleteAuditScheduleResponse> deleteAuditScheduleList(@NotNull List<Integer> idList) {
+    public List<StatusDeleteAuditScheduleResponse> deleteAuditSchedule(@NotNull List<Integer> idList) {
         List<StatusDeleteAuditScheduleResponse> statusList = new ArrayList<>();
         // Find AuditSchedule
         for (int id : idList) {
@@ -195,20 +213,6 @@ public class AuditScheduleService {
             }
         }
         return statusList;
-    }
-
-    public StatusDeleteAuditScheduleResponse deleteAuditSchedule(int id) {
-        Optional<AuditSchedule> auditScheduleOptional = auditScheduleRepository.findById(id);
-        StatusDeleteAuditScheduleResponse status;
-        if (auditScheduleOptional.isPresent()) {
-            AuditSchedule auditSchedule = auditScheduleOptional.get();
-            auditSchedule.setIsDeleted(true);
-            auditScheduleRepository.save(auditSchedule);
-            status = new StatusDeleteAuditScheduleResponse(id, "Success");
-        } else {
-            status = new StatusDeleteAuditScheduleResponse(id, "Failed");
-        }
-        return status;
     }
 
     public UpdateScheduleRequest updateAuditSchedule(UpdateScheduleRequest auditScheduleRequest) {
@@ -242,7 +246,7 @@ public class AuditScheduleService {
         return true;
     }
 
-    public boolean checkAuditSchedule(AuditScheduleRequest auditScheduleRequest) {
+    public void checkAuditSchedule(AuditScheduleRequest auditScheduleRequest) {
         int class_id = auditScheduleRequest.getClassId();
         if (!commonService.checkAuditor(auditScheduleRequest.getAuditorId())) {
             throw new BadRequestException(
@@ -263,14 +267,82 @@ public class AuditScheduleService {
         if (auditScheduleRequest.getTime().before(new Date()))
             throw new BadRequestException("Time must later than current time");
         Set<Integer> traineesId = userFeignClient.getTraineesId(auditScheduleRequest.getClassId());
-        Set<Integer> traineesIdNotExist = new HashSet<Integer>(auditScheduleRequest.getTraineesId());
+        Set<Integer> traineesIdNotExist = new HashSet<>(auditScheduleRequest.getTraineesId());
         traineesIdNotExist.removeAll(traineesId);
         if (!traineesIdNotExist.isEmpty())
-            throw new BadRequestException("Trainee with id " + traineesIdNotExist.toString()
+            throw new BadRequestException("Trainee with id " + traineesIdNotExist
                     + " do not exist in class id " + class_id);
         if (classFeignClient.getNumAudit(class_id) < auditScheduleRequest.getSession())
             throw new BadRequestException(
                     "Session " + auditScheduleRequest.getSession() + " not available for class id " + class_id);
-        return true;
+    }
+
+    public AuditSchedule createAudit(AuditScheduleRequest auditScheduleRequest) {
+        int class_id = auditScheduleRequest.getClassId();
+        int session = auditScheduleRequest.getSession();
+        checkAuditSchedule(auditScheduleRequest);
+        Set<AuditTrainee> auditTrainees = new HashSet<>();
+        auditScheduleRequest.getTraineesId().forEach(id -> {
+            auditTrainees.add(new AuditTrainee(null, id));
+        });
+        AuditSchedule auditSchedule = new AuditSchedule(auditScheduleRequest.getTime(),
+                auditScheduleRequest.getAuditorId(), auditScheduleRequest.getSkillId(),
+                auditScheduleRequest.getRoom(),
+                auditScheduleRequest.getModuleId(), class_id, auditTrainees,
+                session, false);
+        auditScheduleRepository.save(auditSchedule);
+        auditSchedule.getAuditTrainees().forEach(trainee -> {
+            trainee.setAuditSchedule(auditSchedule);
+            auditTraineeRepository.save(trainee);
+        });
+        return auditSchedule;
+    }
+
+    public List<UserNameResponse> getAuditors() {
+        return userFeignClient.getAuditorList();
+    }
+
+    public List<UserNameResponse> getTrainees(int class_id) {
+        if (!commonService.checkClass(class_id))
+            throw new NotFoundException("Not found class id " + class_id);
+        return userFeignClient.getTraineeList(class_id);
+    }
+
+    public List<ModuleResponse> getModules(int class_id) {
+        if (!commonService.checkClass(class_id))
+            throw new NotFoundException("Not found class id " + class_id);
+        return classFeignClient.getModules(class_id);
+    }
+
+    public void sendMail(AuditScheduleRequest auditScheduleRequest, int adminId) throws JsonProcessingException{
+        List<Integer> listIdTrainees = new ArrayList<>(auditScheduleRequest.getTraineesId());
+        Map<Integer,UserNameEmailRequest> listEmailTrainee = userFeignClient.getNameEmailByIds(listIdTrainees);
+        int auditorId = auditScheduleRequest.getAuditorId();
+        Map<Integer,UserNameEmailRequest> auditorInfo = userFeignClient.getNameEmailByIds(new ArrayList<>(auditorId));
+        MailRequest mailRequest = new MailRequest();
+        String[] cc = new String[1];
+        cc[0] = auditorInfo.get(auditorId).getMail();
+        String[] toMail = new String[10];
+        Set<Integer> key = listEmailTrainee.keySet();
+        int count = 0;
+        for (int i : key) {
+            toMail[count] = listEmailTrainee.get(i).getMail();
+            count++;
+        }
+        DateFormat dateFormat = new SimpleDateFormat();
+        mailRequest.setAuditor(auditorInfo.get(auditorId).getName());
+        mailRequest.setToMail(toMail);
+        mailRequest.setCc(cc);
+        mailRequest.setBcc(null);
+        mailRequest.setContent(null);
+        mailRequest.setFullName(null);
+        mailRequest.setUsername(null);
+        mailRequest.setPassword(null);
+        mailRequest.setSubject(null);
+        mailRequest.setTime(dateFormat.format(auditScheduleRequest.getTime()));
+        mailRequest.setLocation(auditScheduleRequest.getRoom());
+
+        ObjectMapper mapper = new ObjectMapper();
+        userFeignClient.sendEmailForAuditFeature(adminId, "SCHEDULE_AUDIT", null, mapper.writeValueAsString(mailRequest));
     }
 }

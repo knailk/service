@@ -8,7 +8,6 @@ public class InternalServerException extends RuntimeException {
     private final String message;
 
     public InternalServerException(String message) {
-        // super("Internal Server Error");
         this.message = message;
     }
 

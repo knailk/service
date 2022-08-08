@@ -10,5 +10,6 @@ import lombok.Setter;
 
 @Getter@Setter
 public class EvaluatedShowResponse {
-	private List<EvaluationDTO> listEva = new ArrayList<>();	
+	private List<EvaluationDTO> listEva = new ArrayList<>();
+	private Double gpa;	
 }

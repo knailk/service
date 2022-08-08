@@ -12,6 +12,5 @@ public class EvaluationDTO {
 	private String level; // Question
 	private String assessment; // IndividualAuditReport
 	private double score; // IndividualAuditReport
-	private String firstName; //user-> first_name
-	private String lastName; //user-> last_name
+	private String auditorName; //user-> first_name
 }

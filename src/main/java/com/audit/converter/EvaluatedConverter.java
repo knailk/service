@@ -9,15 +9,14 @@ import com.audit.entity.Question;
 
 @Component
 public class EvaluatedConverter {
-    public EvaluationDTO toDTO(AuditSchedule aSchedule, IndividualAuditReport IAReport, Question qBank){
+    public EvaluationDTO toDTO(AuditSchedule aSchedule, IndividualAuditReport IAReport, Question qBank, String auditor_name){
         EvaluationDTO dto = new EvaluationDTO();
         dto.setTime(aSchedule.getTime());
         dto.setContent(qBank.getContent());
         dto.setLevel(qBank.getLevel());
         dto.setAssessment(IAReport.getAssessment());
         dto.setScore(IAReport.getScore());
-        dto.setFirstName("Tran Van");
-        dto.setLastName("A");
+        dto.setAuditorName(auditor_name);
         return dto;
     }
 }

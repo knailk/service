@@ -1,8 +1,8 @@
 package com.audit.request;
 
 public class UserNameEmailRequest {
-    String name;
-    String email;
+    String name = "Not Found!";
+    String mail = "Not Found!";
 
     public UserNameEmailRequest(){}
 
@@ -14,16 +14,16 @@ public class UserNameEmailRequest {
         this.name = name;
     }
 
-    public String getEmail() {
-        return email;
+    public String getMail() {
+        return mail;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setMail(String mail) {
+        this.mail = mail;
     }
 
-    public UserNameEmailRequest(String name, String email) {
+    public UserNameEmailRequest(String name, String mail) {
         this.name = name;
-        this.email = email;
+        this.mail = mail;
     }
 }
